@@ -3,16 +3,24 @@ package ru.maxx52.pulseplayer.data
 import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.maxx52.pulseplayer.model.Song
+import java.io.File
 
 class MediaStoreMusicRepository(
     private val context: Context,
 ) {
     suspend fun loadSongs(): List<Song> = withContext(Dispatchers.IO) {
         val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        @Suppress("DEPRECATION")
+        val folderColumnName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.MediaColumns.RELATIVE_PATH
+        } else {
+            MediaStore.MediaColumns.DATA
+        }
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.TITLE,
@@ -20,6 +28,8 @@ class MediaStoreMusicRepository(
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.ALBUM_ID,
             MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.DATE_ADDED,
+            folderColumnName,
         )
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND " +
             "${MediaStore.Audio.Media.DURATION} >= ?"
@@ -39,10 +49,22 @@ class MediaStoreMusicRepository(
                 val albumColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val albumIdColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
                 val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                val folderColumn = cursor.getColumnIndexOrThrow(folderColumnName)
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idColumn)
                     val albumId = cursor.getLong(albumIdColumn)
+                    val folder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        cursor.getString(folderColumn)
+                            ?.trimEnd('/')
+                            .orUnknown("Неизвестная папка")
+                    } else {
+                        cursor.getString(folderColumn)
+                            ?.let(::File)
+                            ?.parent
+                            .orUnknown("Неизвестная папка")
+                    }
                     add(
                         Song(
                             id = id,
@@ -54,6 +76,8 @@ class MediaStoreMusicRepository(
                             artworkUri = albumId.takeIf { it > 0 }?.let {
                                 ContentUris.withAppendedId(ALBUM_ART_URI, it)
                             },
+                            folder = folder,
+                            dateAddedSeconds = cursor.getLong(dateAddedColumn),
                         ),
                     )
                 }

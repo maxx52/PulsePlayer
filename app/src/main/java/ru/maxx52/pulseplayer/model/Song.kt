@@ -12,6 +12,8 @@ data class Song(
     val durationMs: Long,
     val contentUri: Uri,
     val artworkUri: Uri?,
+    val folder: String = "Неизвестная папка",
+    val dateAddedSeconds: Long = 0L,
 ) {
     fun toMediaItem(): MediaItem = MediaItem.Builder()
         .setMediaId(id.toString())

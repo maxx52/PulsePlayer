@@ -45,12 +45,26 @@ data class PlayerUiState(
     val sleepTimerRemainingMs: Long = 0L,
 )
 
+enum class SongSort {
+    TITLE,
+    ARTIST,
+    DATE_ADDED,
+    DURATION,
+}
+
+data class SortSettings(
+    val sort: SongSort = SongSort.TITLE,
+    val ascending: Boolean = true,
+)
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = MediaStoreMusicRepository(application)
     private val preferences = MusicPreferences(application)
 
     private val allSongs = MutableStateFlow<List<Song>>(emptyList())
     private val searchQuery = MutableStateFlow("")
+    private val _sortSettings = MutableStateFlow(SortSettings())
+    val sortSettings: StateFlow<SortSettings> = _sortSettings
     private val _libraryState = MutableStateFlow(LibraryUiState())
     val libraryState: StateFlow<LibraryUiState> = _libraryState
 
@@ -65,13 +79,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         emptyList(),
     )
 
-    val filteredSongs: StateFlow<List<Song>> = combine(allSongs, searchQuery) { songs, query ->
+    val filteredSongs: StateFlow<List<Song>> = combine(
+        allSongs,
+        searchQuery,
+        _sortSettings,
+    ) { songs, query, settings ->
         val needle = query.trim()
-        if (needle.isEmpty()) songs else songs.filter { song ->
+        val filtered = if (needle.isEmpty()) songs else songs.filter { song ->
             song.title.contains(needle, ignoreCase = true) ||
                 song.artist.contains(needle, ignoreCase = true) ||
-                song.album.contains(needle, ignoreCase = true)
+                song.album.contains(needle, ignoreCase = true) ||
+                song.folder.contains(needle, ignoreCase = true)
         }
+        val comparator = when (settings.sort) {
+            SongSort.TITLE -> compareBy<Song> { it.title.lowercase() }
+                .thenBy { it.artist.lowercase() }
+            SongSort.ARTIST -> compareBy<Song> { it.artist.lowercase() }
+                .thenBy { it.title.lowercase() }
+            SongSort.DATE_ADDED -> compareBy<Song> { it.dateAddedSeconds }
+                .thenBy { it.title.lowercase() }
+            SongSort.DURATION -> compareBy<Song> { it.durationMs }
+                .thenBy { it.title.lowercase() }
+        }
+        filtered.sortedWith(if (settings.ascending) comparator else comparator.reversed())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val query: StateFlow<String> = searchQuery
@@ -151,6 +181,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateQuery(value: String) {
         searchQuery.value = value
+    }
+
+    fun selectSort(sort: SongSort) {
+        _sortSettings.update { current ->
+            if (current.sort == sort) {
+                current.copy(ascending = !current.ascending)
+            } else {
+                SortSettings(
+                    sort = sort,
+                    ascending = sort != SongSort.DATE_ADDED,
+                )
+            }
+        }
     }
 
     fun play(song: Song, queue: List<Song>) {
@@ -349,6 +392,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             durationMs = 0L,
             contentUri = uri,
             artworkUri = mediaMetadata.artworkUri,
+            folder = "Неизвестная папка",
+            dateAddedSeconds = 0L,
         )
     }
 

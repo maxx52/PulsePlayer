@@ -28,11 +28,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -51,6 +54,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -102,6 +106,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.maxx52.pulseplayer.MainViewModel
 import ru.maxx52.pulseplayer.PlayerUiState
+import ru.maxx52.pulseplayer.SongSort
+import ru.maxx52.pulseplayer.SortSettings
 import ru.maxx52.pulseplayer.model.Playlist
 import ru.maxx52.pulseplayer.model.Song
 import ru.maxx52.pulseplayer.ui.theme.PulseMint
@@ -120,6 +126,7 @@ private enum class LibraryView(val title: String, val icon: ImageVector) {
     TRACKS("Треки", Icons.Rounded.LibraryMusic),
     ARTISTS("Исполнители", Icons.Rounded.Person),
     ALBUMS("Альбомы", Icons.Rounded.Album),
+    FOLDERS("Папки", Icons.Rounded.Folder),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -135,6 +142,7 @@ fun PulseApp(
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
+    val sortSettings by viewModel.sortSettings.collectAsStateWithLifecycle()
 
     var activeTab by rememberSaveable { mutableStateOf(HomeTab.MUSIC) }
     var showPlayer by rememberSaveable { mutableStateOf(false) }
@@ -149,6 +157,8 @@ fun PulseApp(
     var queueSongAction by remember { mutableStateOf<Song?>(null) }
     var showQueue by rememberSaveable { mutableStateOf(false) }
     var showSleepTimer by rememberSaveable { mutableStateOf(false) }
+    var openedFolder by rememberSaveable { mutableStateOf<String?>(null) }
+    var showSortDialog by rememberSaveable { mutableStateOf(false) }
 
     if (!permissionGranted) {
         PermissionScreen(requestPermission)
@@ -232,7 +242,12 @@ fun PulseApp(
                             openedArtist = null
                             openedAlbum = null
                             openedAlbumArtist = null
+                            openedFolder = null
                         },
+                    )
+                    SortBar(
+                        settings = sortSettings,
+                        onClick = { showSortDialog = true },
                     )
                     when (libraryView) {
                         LibraryView.TRACKS -> SongList(
@@ -296,6 +311,30 @@ fun PulseApp(
                                         openedAlbum = null
                                         openedAlbumArtist = null
                                     },
+                                    onPlay = viewModel::play,
+                                    onFavorite = viewModel::toggleFavorite,
+                                    onAddToPlaylist = { choosePlaylistForSong = it },
+                                    onQueueAction = { queueSongAction = it },
+                                )
+                            }
+                        }
+
+                        LibraryView.FOLDERS -> {
+                            val folder = openedFolder
+                            if (folder == null) {
+                                FolderOverview(
+                                    songs = songs,
+                                    onOpen = { openedFolder = it },
+                                )
+                            } else {
+                                val folderSongs = songs.filter { it.folder == folder }
+                                CollectionDetail(
+                                    title = folderDisplayName(folder),
+                                    subtitle = "$folder • ${folderSongs.size} треков",
+                                    icon = Icons.Rounded.Folder,
+                                    songs = folderSongs,
+                                    favorites = favorites,
+                                    onBack = { openedFolder = null },
                                     onPlay = viewModel::play,
                                     onFavorite = viewModel::toggleFavorite,
                                     onAddToPlaylist = { choosePlaylistForSong = it },
@@ -396,6 +435,17 @@ fun PulseApp(
             onSelect = {
                 viewModel.setSleepTimer(it)
                 showSleepTimer = false
+            },
+        )
+    }
+
+    if (showSortDialog) {
+        SortDialog(
+            settings = sortSettings,
+            onDismiss = { showSortDialog = false },
+            onSelect = {
+                viewModel.selectSort(it)
+                showSortDialog = false
             },
         )
     }
@@ -529,7 +579,7 @@ private fun LibraryHeader(songCount: Int, query: String, onQueryChange: (String)
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             shape = RoundedCornerShape(18.dp),
-            placeholder = { Text("Название, исполнитель или альбом") },
+            placeholder = { Text("Название, исполнитель, альбом или папка") },
             leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
             trailingIcon = {
                 if (query.isNotEmpty()) {
@@ -560,6 +610,35 @@ private fun LibraryViewSelector(
                 onClick = { onSelect(view) },
                 label = { Text(view.title) },
                 leadingIcon = { Icon(view.icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SortBar(
+    settings: SortSettings,
+    onClick: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 3.dp)
+            .clickable(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.Sort, contentDescription = null, tint = PulseMint)
+            Spacer(Modifier.width(9.dp))
+            Text("Сначала: ${sortTitle(settings.sort)}", modifier = Modifier.weight(1f))
+            Icon(
+                if (settings.ascending) Icons.Rounded.ArrowUpward else Icons.Rounded.ArrowDownward,
+                contentDescription = if (settings.ascending) "По возрастанию" else "По убыванию",
+                tint = PulseMuted,
             )
         }
     }
@@ -614,6 +693,34 @@ private fun AlbumOverview(
                 artworkUri = albumSongs.firstNotNullOfOrNull(Song::artworkUri),
                 icon = Icons.Rounded.Album,
                 onClick = { onOpen(albumInfo.first, albumInfo.second) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun FolderOverview(
+    songs: List<Song>,
+    onOpen: (String) -> Unit,
+) {
+    val folders = songs.groupBy(Song::folder)
+        .toList()
+        .sortedBy { folderDisplayName(it.first).lowercase() }
+    if (folders.isEmpty()) {
+        EmptyState(Icons.Rounded.Folder, "Папки с музыкой не найдены")
+        return
+    }
+    LazyColumn(
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        items(folders, key = { it.first }) { (folder, folderSongs) ->
+            CollectionCard(
+                title = folderDisplayName(folder),
+                subtitle = "$folder • ${folderSongs.size} треков",
+                artworkUri = folderSongs.firstNotNullOfOrNull(Song::artworkUri),
+                icon = Icons.Rounded.Folder,
+                onClick = { onOpen(folder) },
             )
         }
     }
@@ -1226,6 +1333,49 @@ private fun SleepTimerDialog(
 }
 
 @Composable
+private fun SortDialog(
+    settings: SortSettings,
+    onDismiss: () -> Unit,
+    onSelect: (SongSort) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Sort, contentDescription = null, tint = PulseMint) },
+        title = { Text("Сортировка") },
+        text = {
+            Column {
+                SongSort.entries.forEach { sort ->
+                    TextButton(
+                        onClick = { onSelect(sort) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            sortTitle(sort),
+                            modifier = Modifier.weight(1f),
+                            fontWeight = if (settings.sort == sort) FontWeight.Bold else FontWeight.Normal,
+                        )
+                        if (settings.sort == sort) {
+                            Icon(
+                                if (settings.ascending) Icons.Rounded.ArrowUpward else Icons.Rounded.ArrowDownward,
+                                contentDescription = null,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Повторный выбор текущего варианта меняет направление.",
+                    color = PulseMuted,
+                    fontSize = 12.sp,
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } },
+    )
+}
+
+@Composable
 private fun PlaylistPickerDialog(
     song: Song,
     playlists: List<Playlist>,
@@ -1352,6 +1502,19 @@ private fun formatDuration(milliseconds: Long): String {
     val seconds = totalSeconds % 60
     return "%d:%02d".format(minutes, seconds)
 }
+
+private fun sortTitle(sort: SongSort): String = when (sort) {
+    SongSort.TITLE -> "по названию"
+    SongSort.ARTIST -> "по исполнителю"
+    SongSort.DATE_ADDED -> "по дате добавления"
+    SongSort.DURATION -> "по длительности"
+}
+
+private fun folderDisplayName(folder: String): String = folder
+    .trimEnd('/', '\\')
+    .substringAfterLast('/')
+    .substringAfterLast('\\')
+    .ifBlank { "Корневая папка" }
 
 private fun formatTimer(milliseconds: Long): String {
     val totalMinutes = (milliseconds.coerceAtLeast(0L) + 59_999L) / 60_000L
