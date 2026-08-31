@@ -1,0 +1,892 @@
+package ru.maxx52.pulseplayer.ui
+
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ContentScale
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.Player
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ru.maxx52.pulseplayer.MainViewModel
+import ru.maxx52.pulseplayer.PlayerUiState
+import ru.maxx52.pulseplayer.model.Playlist
+import ru.maxx52.pulseplayer.model.Song
+import ru.maxx52.pulseplayer.ui.theme.PulseMint
+import ru.maxx52.pulseplayer.ui.theme.PulseMuted
+import ru.maxx52.pulseplayer.ui.theme.PulsePink
+import ru.maxx52.pulseplayer.ui.theme.PulsePurple
+import ru.maxx52.pulseplayer.ui.theme.PulseSurfaceHigh
+
+private enum class HomeTab(val title: String, val icon: ImageVector) {
+    MUSIC("Музыка", Icons.Rounded.LibraryMusic),
+    FAVORITES("Любимое", Icons.Rounded.Favorite),
+    PLAYLISTS("Плейлисты", Icons.Rounded.QueueMusic),
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PulseApp(
+    viewModel: MainViewModel,
+    permissionGranted: Boolean,
+    requestPermission: () -> Unit,
+) {
+    val libraryState by viewModel.libraryState.collectAsStateWithLifecycle()
+    val songs by viewModel.filteredSongs.collectAsStateWithLifecycle()
+    val favorites by viewModel.favorites.collectAsStateWithLifecycle()
+    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val playerState by viewModel.playerState.collectAsStateWithLifecycle()
+    val query by viewModel.query.collectAsStateWithLifecycle()
+
+    var activeTab by rememberSaveable { mutableStateOf(HomeTab.MUSIC) }
+    var showPlayer by rememberSaveable { mutableStateOf(false) }
+    var createPlaylistForSong by remember { mutableStateOf<Song?>(null) }
+    var showCreatePlaylist by remember { mutableStateOf(false) }
+    var choosePlaylistForSong by remember { mutableStateOf<Song?>(null) }
+    var openedPlaylist by rememberSaveable { mutableStateOf<String?>(null) }
+
+    if (!permissionGranted) {
+        PermissionScreen(requestPermission)
+        return
+    }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        text = "PULSE",
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 4.sp,
+                    )
+                },
+                actions = {
+                    IconButton(onClick = viewModel::loadLibrary) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Обновить медиатеку")
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+            )
+        },
+        bottomBar = {
+            Column(
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.background)
+                    .navigationBarsPadding(),
+            ) {
+                playerState.currentSong?.let { song ->
+                    MiniPlayer(
+                        song = song,
+                        isPlaying = playerState.isPlaying,
+                        onOpen = { showPlayer = true },
+                        onPlayPause = viewModel::togglePlayPause,
+                        onPrevious = viewModel::skipPrevious,
+                        onNext = viewModel::skipNext,
+                    )
+                }
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                    HomeTab.entries.forEach { tab ->
+                        NavigationBarItem(
+                            selected = activeTab == tab,
+                            onClick = {
+                                activeTab = tab
+                                if (tab != HomeTab.PLAYLISTS) openedPlaylist = null
+                            },
+                            icon = { Icon(tab.icon, contentDescription = null) },
+                            label = { Text(tab.title) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = PulseMint,
+                                selectedTextColor = PulseMint,
+                                indicatorColor = PulseMint.copy(alpha = 0.14f),
+                            ),
+                        )
+                    }
+                }
+            }
+        },
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            when (activeTab) {
+                HomeTab.MUSIC -> {
+                    LibraryHeader(
+                        songCount = libraryState.songs.size,
+                        query = query,
+                        onQueryChange = viewModel::updateQuery,
+                    )
+                    SongList(
+                        songs = songs,
+                        queue = songs,
+                        favorites = favorites,
+                        loading = libraryState.isLoading,
+                        emptyTitle = libraryState.error ?: "На телефоне пока нет музыки",
+                        onPlay = viewModel::play,
+                        onFavorite = viewModel::toggleFavorite,
+                        onAddToPlaylist = { choosePlaylistForSong = it },
+                    )
+                }
+
+                HomeTab.FAVORITES -> {
+                    SectionHeader("ЛЮБИМЫЕ", "Треки, к которым хочется возвращаться")
+                    val favoriteSongs = songs.filter { it.id in favorites }
+                    SongList(
+                        songs = favoriteSongs,
+                        queue = favoriteSongs,
+                        favorites = favorites,
+                        loading = false,
+                        emptyTitle = "Добавьте первый любимый трек",
+                        onPlay = viewModel::play,
+                        onFavorite = viewModel::toggleFavorite,
+                        onAddToPlaylist = { choosePlaylistForSong = it },
+                    )
+                }
+
+                HomeTab.PLAYLISTS -> {
+                    val selectedPlaylist = playlists.firstOrNull { it.name == openedPlaylist }
+                    if (selectedPlaylist == null) {
+                        PlaylistOverview(
+                            playlists = playlists,
+                            onOpen = { openedPlaylist = it.name },
+                            onCreate = { showCreatePlaylist = true },
+                            onDelete = viewModel::deletePlaylist,
+                        )
+                    } else {
+                        val playlistSongs = viewModel.songsByIds(selectedPlaylist.songIds)
+                        PlaylistDetail(
+                            playlist = selectedPlaylist,
+                            songs = playlistSongs,
+                            favorites = favorites,
+                            onBack = { openedPlaylist = null },
+                            onPlay = viewModel::play,
+                            onFavorite = viewModel::toggleFavorite,
+                            onRemove = { song ->
+                                viewModel.removeFromPlaylist(selectedPlaylist.name, song.id)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showPlayer && playerState.currentSong != null) {
+        ModalBottomSheet(
+            onDismissRequest = { showPlayer = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
+            FullPlayer(
+                state = playerState,
+                isFavorite = playerState.currentSong!!.id in favorites,
+                onPlayPause = viewModel::togglePlayPause,
+                onPrevious = viewModel::skipPrevious,
+                onNext = viewModel::skipNext,
+                onSeek = viewModel::seekTo,
+                onFavorite = { viewModel.toggleFavorite(playerState.currentSong!!.id) },
+                onShuffle = viewModel::toggleShuffle,
+                onRepeat = viewModel::cycleRepeatMode,
+            )
+        }
+    }
+
+    choosePlaylistForSong?.let { song ->
+        PlaylistPickerDialog(
+            song = song,
+            playlists = playlists,
+            onDismiss = { choosePlaylistForSong = null },
+            onChoose = { playlist ->
+                viewModel.addToPlaylist(playlist.name, song.id)
+                choosePlaylistForSong = null
+            },
+            onCreate = {
+                createPlaylistForSong = song
+                choosePlaylistForSong = null
+            },
+        )
+    }
+
+    if (showCreatePlaylist || createPlaylistForSong != null) {
+        CreatePlaylistDialog(
+            onDismiss = {
+                showCreatePlaylist = false
+                createPlaylistForSong = null
+            },
+            onCreate = { name ->
+                viewModel.createPlaylist(name, createPlaylistForSong?.id)
+                showCreatePlaylist = false
+                createPlaylistForSong = null
+            },
+        )
+    }
+}
+
+@Composable
+private fun PermissionScreen(onRequest: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.radialGradient(
+                    listOf(PulsePurple.copy(alpha = 0.34f), Color.Transparent),
+                ),
+            )
+            .padding(28.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(112.dp)
+                    .clip(RoundedCornerShape(34.dp))
+                    .background(
+                        Brush.linearGradient(listOf(PulsePurple, PulsePink, PulseMint)),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.MusicNote,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(58.dp),
+                )
+            }
+            Spacer(Modifier.height(30.dp))
+            Text("ТВОЯ МУЗЫКА.\nТВОЙ РИТМ.", fontSize = 34.sp, fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Pulse найдёт аудиофайлы на телефоне. Мы ничего не загружаем в интернет.",
+                color = PulseMuted,
+                fontSize = 16.sp,
+            )
+            Spacer(Modifier.height(26.dp))
+            Button(
+                onClick = onRequest,
+                colors = ButtonDefaults.buttonColors(containerColor = PulsePurple),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Rounded.Lock, contentDescription = null)
+                Spacer(Modifier.width(10.dp))
+                Text("РАЗРЕШИТЬ ДОСТУП", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryHeader(songCount: Int, query: String, onQueryChange: (String) -> Unit) {
+    Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = PulseSurfaceHigh),
+            shape = RoundedCornerShape(28.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.linearGradient(
+                            listOf(PulsePurple.copy(alpha = 0.75f), PulsePink.copy(alpha = 0.42f)),
+                        ),
+                    )
+                    .padding(22.dp),
+            ) {
+                Column {
+                    Text("ТВОЯ МУЗЫКА", fontSize = 26.sp, fontWeight = FontWeight.Black)
+                    Text("$songCount треков готовы звучать", color = Color.White.copy(alpha = 0.72f))
+                }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(18.dp),
+            placeholder = { Text("Название, исполнитель или альбом") },
+            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Очистить поиск")
+                    }
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String, subtitle: String) {
+    Column(Modifier.padding(horizontal = 20.dp, vertical = 14.dp)) {
+        Text(title, fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Text(subtitle, color = PulseMuted)
+    }
+}
+
+@Composable
+private fun SongList(
+    songs: List<Song>,
+    queue: List<Song>,
+    favorites: Set<Long>,
+    loading: Boolean,
+    emptyTitle: String,
+    onPlay: (Song, List<Song>) -> Unit,
+    onFavorite: (Long) -> Unit,
+    onAddToPlaylist: (Song) -> Unit,
+) {
+    if (loading) {
+        EmptyState(Icons.Rounded.MusicNote, "Сканируем медиатеку…")
+        return
+    }
+    if (songs.isEmpty()) {
+        EmptyState(Icons.Rounded.LibraryMusic, emptyTitle)
+        return
+    }
+    LazyColumn(
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            start = 14.dp,
+            end = 14.dp,
+            top = 4.dp,
+            bottom = 16.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(songs, key = Song::id) { song ->
+            SongRow(
+                song = song,
+                isFavorite = song.id in favorites,
+                onPlay = { onPlay(song, queue) },
+                onFavorite = { onFavorite(song.id) },
+                onPlaylistAction = { onAddToPlaylist(song) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SongRow(
+    song: Song,
+    isFavorite: Boolean,
+    onPlay: () -> Unit,
+    onFavorite: () -> Unit,
+    onPlaylistAction: () -> Unit,
+    playlistActionIsRemove: Boolean = false,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onPlay),
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AlbumArtwork(song.artworkUri, Modifier.size(58.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    song.title,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    "${song.artist}  •  ${formatDuration(song.durationMs)}",
+                    color = PulseMuted,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onFavorite) {
+                Icon(
+                    if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    contentDescription = "Избранное",
+                    tint = if (isFavorite) PulsePink else PulseMuted,
+                )
+            }
+            IconButton(onClick = onPlaylistAction) {
+                Icon(
+                    if (playlistActionIsRemove) Icons.Rounded.DeleteOutline else Icons.Rounded.PlaylistAdd,
+                    contentDescription = if (playlistActionIsRemove) "Убрать" else "В плейлист",
+                    tint = PulseMint,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistOverview(
+    playlists: List<Playlist>,
+    onOpen: (Playlist) -> Unit,
+    onCreate: () -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("ПЛЕЙЛИСТЫ", fontSize = 28.sp, fontWeight = FontWeight.Black)
+                Text("Соберите настроение в один список", color = PulseMuted)
+            }
+            FilledIconButton(onClick = onCreate) {
+                Icon(Icons.Rounded.Add, contentDescription = "Новый плейлист")
+            }
+        }
+        if (playlists.isEmpty()) {
+            EmptyState(Icons.Rounded.QueueMusic, "Создайте свой первый плейлист")
+        } else {
+            LazyColumn(
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(playlists, key = Playlist::name) { playlist ->
+                    Card(
+                        shape = RoundedCornerShape(22.dp),
+                        colors = CardDefaults.cardColors(containerColor = PulseSurfaceHigh),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpen(playlist) },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(58.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(
+                                        Brush.linearGradient(listOf(PulsePurple, PulsePink)),
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Rounded.QueueMusic, contentDescription = null)
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(playlist.name, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                                Text("${playlist.songIds.size} треков", color = PulseMuted)
+                            }
+                            IconButton(onClick = { onDelete(playlist.name) }) {
+                                Icon(Icons.Rounded.DeleteOutline, contentDescription = "Удалить")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistDetail(
+    playlist: Playlist,
+    songs: List<Song>,
+    favorites: Set<Long>,
+    onBack: () -> Unit,
+    onPlay: (Song, List<Song>) -> Unit,
+    onFavorite: (Long) -> Unit,
+    onRemove: (Song) -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Rounded.ArrowBack, contentDescription = "Назад")
+            }
+            Column {
+                Text(playlist.name, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                Text("${songs.size} треков", color = PulseMuted)
+            }
+        }
+        if (songs.isEmpty()) {
+            EmptyState(Icons.Rounded.PlaylistAdd, "Добавьте музыку в этот плейлист")
+        } else {
+            LazyColumn(
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(songs, key = Song::id) { song ->
+                    SongRow(
+                        song = song,
+                        isFavorite = song.id in favorites,
+                        onPlay = { onPlay(song, songs) },
+                        onFavorite = { onFavorite(song.id) },
+                        onPlaylistAction = { onRemove(song) },
+                        playlistActionIsRemove = true,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniPlayer(
+    song: Song,
+    isPlaying: Boolean,
+    onOpen: () -> Unit,
+    onPlayPause: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .clickable(onClick = onOpen),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = PulseSurfaceHigh),
+    ) {
+        Row(
+            modifier = Modifier.padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AlbumArtwork(song.artworkUri, Modifier.size(50.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(song.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(song.artist, color = PulseMuted, fontSize = 12.sp, maxLines = 1)
+            }
+            IconButton(onClick = onPrevious) {
+                Icon(Icons.Rounded.SkipPrevious, contentDescription = "Предыдущий")
+            }
+            FilledIconButton(onClick = onPlayPause, modifier = Modifier.size(44.dp)) {
+                Icon(
+                    if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = "Пауза или воспроизведение",
+                )
+            }
+            IconButton(onClick = onNext) {
+                Icon(Icons.Rounded.SkipNext, contentDescription = "Следующий")
+            }
+        }
+    }
+}
+
+@Composable
+private fun FullPlayer(
+    state: PlayerUiState,
+    isFavorite: Boolean,
+    onPlayPause: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onFavorite: () -> Unit,
+    onShuffle: () -> Unit,
+    onRepeat: () -> Unit,
+) {
+    val song = state.currentSong ?: return
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 30.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        AlbumArtwork(
+            artworkUri = song.artworkUri,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f),
+            cornerRadius = 34.dp,
+        )
+        Spacer(Modifier.height(24.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    song.title,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(song.artist, color = PulseMuted, fontSize = 16.sp)
+            }
+            IconButton(onClick = onFavorite) {
+                Icon(
+                    if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    contentDescription = "Избранное",
+                    tint = if (isFavorite) PulsePink else PulseMuted,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Slider(
+            value = state.positionMs.coerceAtMost(state.durationMs).toFloat(),
+            onValueChange = { onSeek(it.toLong()) },
+            valueRange = 0f..state.durationMs.coerceAtLeast(1L).toFloat(),
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(formatDuration(state.positionMs), color = PulseMuted, fontSize = 12.sp)
+            Text(formatDuration(state.durationMs), color = PulseMuted, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onShuffle) {
+                Icon(
+                    Icons.Rounded.Shuffle,
+                    contentDescription = "Перемешать",
+                    tint = if (state.shuffleEnabled) PulseMint else PulseMuted,
+                )
+            }
+            IconButton(onClick = onPrevious, modifier = Modifier.size(56.dp)) {
+                Icon(Icons.Rounded.SkipPrevious, contentDescription = "Предыдущий", modifier = Modifier.size(36.dp))
+            }
+            FilledIconButton(
+                onClick = onPlayPause,
+                modifier = Modifier.size(74.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(containerColor = PulsePurple),
+            ) {
+                Icon(
+                    if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = "Пауза или воспроизведение",
+                    modifier = Modifier.size(38.dp),
+                )
+            }
+            IconButton(onClick = onNext, modifier = Modifier.size(56.dp)) {
+                Icon(Icons.Rounded.SkipNext, contentDescription = "Следующий", modifier = Modifier.size(36.dp))
+            }
+            IconButton(onClick = onRepeat) {
+                Icon(
+                    if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+                    contentDescription = "Повтор",
+                    tint = if (state.repeatMode != Player.REPEAT_MODE_OFF) PulseMint else PulseMuted,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistPickerDialog(
+    song: Song,
+    playlists: List<Playlist>,
+    onDismiss: () -> Unit,
+    onChoose: (Playlist) -> Unit,
+    onCreate: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Добавить в плейлист") },
+        text = {
+            Column {
+                Text(song.title, color = PulseMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(12.dp))
+                playlists.forEach { playlist ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onChoose(playlist) }
+                            .padding(vertical = 12.dp, horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Rounded.QueueMusic, contentDescription = null, tint = PulseMint)
+                        Spacer(Modifier.width(10.dp))
+                        Text(playlist.name)
+                    }
+                }
+                if (playlists.isNotEmpty()) HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                TextButton(onClick = onCreate) {
+                    Icon(Icons.Rounded.Add, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Новый плейлист")
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
+}
+
+@Composable
+private fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Новый плейлист") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                label = { Text("Название") },
+                shape = RoundedCornerShape(16.dp),
+            )
+        },
+        confirmButton = {
+            Button(onClick = { onCreate(name) }, enabled = name.isNotBlank()) {
+                Text("Создать")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
+}
+
+@Composable
+private fun EmptyState(icon: ImageVector, title: String) {
+    Box(Modifier.fillMaxSize().padding(30.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, contentDescription = null, tint = PulsePurple, modifier = Modifier.size(62.dp))
+            Spacer(Modifier.height(14.dp))
+            Text(title, color = PulseMuted, fontSize = 17.sp)
+        }
+    }
+}
+
+@Composable
+private fun AlbumArtwork(
+    artworkUri: Uri?,
+    modifier: Modifier,
+    cornerRadius: androidx.compose.ui.unit.Dp = 17.dp,
+) {
+    val context = LocalContext.current
+    val bitmap by produceState<ImageBitmap?>(initialValue = null, key1 = artworkUri) {
+        value = artworkUri?.let { uri ->
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                    }
+                }.getOrNull()
+            }
+        }
+    }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(cornerRadius))
+            .background(
+                Brush.linearGradient(listOf(PulsePurple, PulsePink, PulseMint)),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!,
+                contentDescription = "Обложка",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Icon(
+                Icons.Rounded.MusicNote,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(36.dp),
+            )
+        }
+    }
+}
+
+private fun formatDuration(milliseconds: Long): String {
+    val totalSeconds = milliseconds.coerceAtLeast(0L) / 1_000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%d:%02d".format(minutes, seconds)
+}
