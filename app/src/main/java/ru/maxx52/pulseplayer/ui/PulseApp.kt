@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,31 +15,38 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
@@ -51,6 +59,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -107,6 +116,12 @@ private enum class HomeTab(val title: String, val icon: ImageVector) {
     PLAYLISTS("Плейлисты", Icons.Rounded.QueueMusic),
 }
 
+private enum class LibraryView(val title: String, val icon: ImageVector) {
+    TRACKS("Треки", Icons.Rounded.LibraryMusic),
+    ARTISTS("Исполнители", Icons.Rounded.Person),
+    ALBUMS("Альбомы", Icons.Rounded.Album),
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PulseApp(
@@ -127,6 +142,13 @@ fun PulseApp(
     var showCreatePlaylist by remember { mutableStateOf(false) }
     var choosePlaylistForSong by remember { mutableStateOf<Song?>(null) }
     var openedPlaylist by rememberSaveable { mutableStateOf<String?>(null) }
+    var libraryView by rememberSaveable { mutableStateOf(LibraryView.TRACKS) }
+    var openedArtist by rememberSaveable { mutableStateOf<String?>(null) }
+    var openedAlbum by rememberSaveable { mutableStateOf<String?>(null) }
+    var openedAlbumArtist by rememberSaveable { mutableStateOf<String?>(null) }
+    var queueSongAction by remember { mutableStateOf<Song?>(null) }
+    var showQueue by rememberSaveable { mutableStateOf(false) }
+    var showSleepTimer by rememberSaveable { mutableStateOf(false) }
 
     if (!permissionGranted) {
         PermissionScreen(requestPermission)
@@ -203,16 +225,85 @@ fun PulseApp(
                         query = query,
                         onQueryChange = viewModel::updateQuery,
                     )
-                    SongList(
-                        songs = songs,
-                        queue = songs,
-                        favorites = favorites,
-                        loading = libraryState.isLoading,
-                        emptyTitle = libraryState.error ?: "На телефоне пока нет музыки",
-                        onPlay = viewModel::play,
-                        onFavorite = viewModel::toggleFavorite,
-                        onAddToPlaylist = { choosePlaylistForSong = it },
+                    LibraryViewSelector(
+                        selected = libraryView,
+                        onSelect = {
+                            libraryView = it
+                            openedArtist = null
+                            openedAlbum = null
+                            openedAlbumArtist = null
+                        },
                     )
+                    when (libraryView) {
+                        LibraryView.TRACKS -> SongList(
+                            songs = songs,
+                            queue = songs,
+                            favorites = favorites,
+                            loading = libraryState.isLoading,
+                            emptyTitle = libraryState.error ?: "На телефоне пока нет музыки",
+                            onPlay = viewModel::play,
+                            onFavorite = viewModel::toggleFavorite,
+                            onAddToPlaylist = { choosePlaylistForSong = it },
+                            onQueueAction = { queueSongAction = it },
+                        )
+
+                        LibraryView.ARTISTS -> {
+                            val artist = openedArtist
+                            if (artist == null) {
+                                ArtistOverview(
+                                    songs = songs,
+                                    onOpen = { openedArtist = it },
+                                )
+                            } else {
+                                val artistSongs = songs.filter { it.artist == artist }
+                                CollectionDetail(
+                                    title = artist,
+                                    subtitle = "${artistSongs.size} треков",
+                                    icon = Icons.Rounded.Person,
+                                    songs = artistSongs,
+                                    favorites = favorites,
+                                    onBack = { openedArtist = null },
+                                    onPlay = viewModel::play,
+                                    onFavorite = viewModel::toggleFavorite,
+                                    onAddToPlaylist = { choosePlaylistForSong = it },
+                                    onQueueAction = { queueSongAction = it },
+                                )
+                            }
+                        }
+
+                        LibraryView.ALBUMS -> {
+                            val album = openedAlbum
+                            val albumArtist = openedAlbumArtist
+                            if (album == null || albumArtist == null) {
+                                AlbumOverview(
+                                    songs = songs,
+                                    onOpen = { title, artist ->
+                                        openedAlbum = title
+                                        openedAlbumArtist = artist
+                                    },
+                                )
+                            } else {
+                                val albumSongs = songs.filter {
+                                    it.album == album && it.artist == albumArtist
+                                }
+                                CollectionDetail(
+                                    title = album,
+                                    subtitle = "$albumArtist • ${albumSongs.size} треков",
+                                    icon = Icons.Rounded.Album,
+                                    songs = albumSongs,
+                                    favorites = favorites,
+                                    onBack = {
+                                        openedAlbum = null
+                                        openedAlbumArtist = null
+                                    },
+                                    onPlay = viewModel::play,
+                                    onFavorite = viewModel::toggleFavorite,
+                                    onAddToPlaylist = { choosePlaylistForSong = it },
+                                    onQueueAction = { queueSongAction = it },
+                                )
+                            }
+                        }
+                    }
                 }
 
                 HomeTab.FAVORITES -> {
@@ -227,6 +318,7 @@ fun PulseApp(
                         onPlay = viewModel::play,
                         onFavorite = viewModel::toggleFavorite,
                         onAddToPlaylist = { choosePlaylistForSong = it },
+                        onQueueAction = { queueSongAction = it },
                     )
                 }
 
@@ -251,6 +343,7 @@ fun PulseApp(
                             onRemove = { song ->
                                 viewModel.removeFromPlaylist(selectedPlaylist.name, song.id)
                             },
+                            onQueueAction = { queueSongAction = it },
                         )
                     }
                 }
@@ -273,8 +366,53 @@ fun PulseApp(
                 onFavorite = { viewModel.toggleFavorite(playerState.currentSong!!.id) },
                 onShuffle = viewModel::toggleShuffle,
                 onRepeat = viewModel::cycleRepeatMode,
+                onOpenQueue = {
+                    showPlayer = false
+                    showQueue = true
+                },
+                onOpenSleepTimer = { showSleepTimer = true },
             )
         }
+    }
+
+    if (showQueue) {
+        ModalBottomSheet(
+            onDismissRequest = { showQueue = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
+            QueueSheet(
+                state = playerState,
+                onPlay = viewModel::playQueueItem,
+                onRemove = viewModel::removeQueueItem,
+                onMove = viewModel::moveQueueItem,
+            )
+        }
+    }
+
+    if (showSleepTimer) {
+        SleepTimerDialog(
+            remainingMs = playerState.sleepTimerRemainingMs,
+            onDismiss = { showSleepTimer = false },
+            onSelect = {
+                viewModel.setSleepTimer(it)
+                showSleepTimer = false
+            },
+        )
+    }
+
+    queueSongAction?.let { song ->
+        QueueActionDialog(
+            song = song,
+            onDismiss = { queueSongAction = null },
+            onPlayNext = {
+                viewModel.playNext(song)
+                queueSongAction = null
+            },
+            onAddToEnd = {
+                viewModel.addToQueue(song)
+                queueSongAction = null
+            },
+        )
     }
 
     choosePlaylistForSong?.let { song ->
@@ -405,6 +543,159 @@ private fun LibraryHeader(songCount: Int, query: String, onQueryChange: (String)
 }
 
 @Composable
+private fun LibraryViewSelector(
+    selected: LibraryView,
+    onSelect: (LibraryView) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 18.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        LibraryView.entries.forEach { view ->
+            FilterChip(
+                selected = selected == view,
+                onClick = { onSelect(view) },
+                label = { Text(view.title) },
+                leadingIcon = { Icon(view.icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ArtistOverview(
+    songs: List<Song>,
+    onOpen: (String) -> Unit,
+) {
+    val artists = songs.groupBy(Song::artist).toList().sortedBy { it.first.lowercase() }
+    if (artists.isEmpty()) {
+        EmptyState(Icons.Rounded.Person, "Исполнители не найдены")
+        return
+    }
+    LazyColumn(
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        items(artists, key = { it.first }) { (artist, artistSongs) ->
+            CollectionCard(
+                title = artist,
+                subtitle = "${artistSongs.size} треков • ${artistSongs.map(Song::album).distinct().size} альбомов",
+                artworkUri = artistSongs.firstNotNullOfOrNull(Song::artworkUri),
+                icon = Icons.Rounded.Person,
+                onClick = { onOpen(artist) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AlbumOverview(
+    songs: List<Song>,
+    onOpen: (String, String) -> Unit,
+) {
+    val albums = songs.groupBy { it.album to it.artist }
+        .toList()
+        .sortedWith(compareBy({ it.first.first.lowercase() }, { it.first.second.lowercase() }))
+    if (albums.isEmpty()) {
+        EmptyState(Icons.Rounded.Album, "Альбомы не найдены")
+        return
+    }
+    LazyColumn(
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        items(albums, key = { "${it.first.first}\u0000${it.first.second}" }) { (albumInfo, albumSongs) ->
+            CollectionCard(
+                title = albumInfo.first,
+                subtitle = "${albumInfo.second} • ${albumSongs.size} треков",
+                artworkUri = albumSongs.firstNotNullOfOrNull(Song::artworkUri),
+                icon = Icons.Rounded.Album,
+                onClick = { onOpen(albumInfo.first, albumInfo.second) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun CollectionCard(
+    title: String,
+    subtitle: String,
+    artworkUri: Uri?,
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = PulseSurfaceHigh),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+    ) {
+        Row(Modifier.padding(11.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (artworkUri != null) {
+                AlbumArtwork(artworkUri, Modifier.size(62.dp))
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(62.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Brush.linearGradient(listOf(PulsePurple, PulsePink))),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
+                }
+            }
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, color = PulseMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollectionDetail(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    songs: List<Song>,
+    favorites: Set<Long>,
+    onBack: () -> Unit,
+    onPlay: (Song, List<Song>) -> Unit,
+    onFavorite: (Long) -> Unit,
+    onAddToPlaylist: (Song) -> Unit,
+    onQueueAction: (Song) -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Назад") }
+            Icon(icon, contentDescription = null, tint = PulseMint)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontSize = 22.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, color = PulseMuted, fontSize = 13.sp, maxLines = 1)
+            }
+        }
+        SongList(
+            songs = songs,
+            queue = songs,
+            favorites = favorites,
+            loading = false,
+            emptyTitle = "Треки не найдены",
+            onPlay = onPlay,
+            onFavorite = onFavorite,
+            onAddToPlaylist = onAddToPlaylist,
+            onQueueAction = onQueueAction,
+        )
+    }
+}
+
+@Composable
 private fun SectionHeader(title: String, subtitle: String) {
     Column(Modifier.padding(horizontal = 20.dp, vertical = 14.dp)) {
         Text(title, fontSize = 28.sp, fontWeight = FontWeight.Black)
@@ -422,6 +713,7 @@ private fun SongList(
     onPlay: (Song, List<Song>) -> Unit,
     onFavorite: (Long) -> Unit,
     onAddToPlaylist: (Song) -> Unit,
+    onQueueAction: (Song) -> Unit,
 ) {
     if (loading) {
         EmptyState(Icons.Rounded.MusicNote, "Сканируем медиатеку…")
@@ -447,6 +739,7 @@ private fun SongList(
                 onPlay = { onPlay(song, queue) },
                 onFavorite = { onFavorite(song.id) },
                 onPlaylistAction = { onAddToPlaylist(song) },
+                onQueueAction = { onQueueAction(song) },
             )
         }
     }
@@ -459,6 +752,7 @@ private fun SongRow(
     onPlay: () -> Unit,
     onFavorite: () -> Unit,
     onPlaylistAction: () -> Unit,
+    onQueueAction: (() -> Unit)? = null,
     playlistActionIsRemove: Boolean = false,
 ) {
     Card(
@@ -490,14 +784,23 @@ private fun SongRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            IconButton(onClick = onFavorite) {
+            IconButton(onClick = onFavorite, modifier = Modifier.size(40.dp)) {
                 Icon(
                     if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                     contentDescription = "Избранное",
                     tint = if (isFavorite) PulsePink else PulseMuted,
                 )
             }
-            IconButton(onClick = onPlaylistAction) {
+            onQueueAction?.let { queueAction ->
+                IconButton(onClick = queueAction, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        Icons.Rounded.QueueMusic,
+                        contentDescription = "Действия с очередью",
+                        tint = PulseMuted,
+                    )
+                }
+            }
+            IconButton(onClick = onPlaylistAction, modifier = Modifier.size(40.dp)) {
                 Icon(
                     if (playlistActionIsRemove) Icons.Rounded.DeleteOutline else Icons.Rounded.PlaylistAdd,
                     contentDescription = if (playlistActionIsRemove) "Убрать" else "В плейлист",
@@ -585,6 +888,7 @@ private fun PlaylistDetail(
     onPlay: (Song, List<Song>) -> Unit,
     onFavorite: (Long) -> Unit,
     onRemove: (Song) -> Unit,
+    onQueueAction: (Song) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -613,6 +917,7 @@ private fun PlaylistDetail(
                         onPlay = { onPlay(song, songs) },
                         onFavorite = { onFavorite(song.id) },
                         onPlaylistAction = { onRemove(song) },
+                        onQueueAction = { onQueueAction(song) },
                         playlistActionIsRemove = true,
                     )
                 }
@@ -675,6 +980,8 @@ private fun FullPlayer(
     onFavorite: () -> Unit,
     onShuffle: () -> Unit,
     onRepeat: () -> Unit,
+    onOpenQueue: () -> Unit,
+    onOpenSleepTimer: () -> Unit,
 ) {
     val song = state.currentSong ?: return
     Column(
@@ -760,7 +1067,162 @@ private fun FullPlayer(
                 )
             }
         }
+        Spacer(Modifier.height(14.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            TextButton(onClick = onOpenQueue) {
+                Icon(Icons.Rounded.QueueMusic, contentDescription = null)
+                Spacer(Modifier.width(7.dp))
+                Text("Очередь (${state.queue.size})")
+            }
+            TextButton(onClick = onOpenSleepTimer) {
+                Icon(Icons.Rounded.Bedtime, contentDescription = null)
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    if (state.sleepTimerRemainingMs > 0L) {
+                        "Сон ${formatTimer(state.sleepTimerRemainingMs)}"
+                    } else {
+                        "Таймер сна"
+                    },
+                )
+            }
+        }
     }
+}
+
+@Composable
+private fun QueueSheet(
+    state: PlayerUiState,
+    onPlay: (Int) -> Unit,
+    onRemove: (Int) -> Unit,
+    onMove: (Int, Int) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(bottom = 30.dp),
+    ) {
+        Text("ОЧЕРЕДЬ", fontSize = 27.sp, fontWeight = FontWeight.Black)
+        Text("Меняйте порядок или выбирайте следующий трек", color = PulseMuted)
+        Spacer(Modifier.height(14.dp))
+        if (state.queue.isEmpty()) {
+            Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
+                Text("Очередь пока пуста", color = PulseMuted)
+            }
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp),
+            ) {
+                items(state.queue.size, key = { index -> "${state.queue[index].id}:$index" }) { index ->
+                    val song = state.queue[index]
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (index == state.currentQueueIndex) {
+                                PulsePurple.copy(alpha = 0.22f)
+                            } else {
+                                PulseSurfaceHigh
+                            },
+                        ),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth().clickable { onPlay(index) },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            AlbumArtwork(song.artworkUri, Modifier.size(46.dp), 14.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(song.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(song.artist, color = PulseMuted, fontSize = 12.sp, maxLines = 1)
+                            }
+                            IconButton(onClick = { onMove(index, index - 1) }, enabled = index > 0) {
+                                Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Выше")
+                            }
+                            IconButton(
+                                onClick = { onMove(index, index + 1) },
+                                enabled = index < state.queue.lastIndex,
+                            ) {
+                                Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Ниже")
+                            }
+                            IconButton(onClick = { onRemove(index) }) {
+                                Icon(Icons.Rounded.RemoveCircleOutline, contentDescription = "Убрать", tint = PulsePink)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QueueActionDialog(
+    song: Song,
+    onDismiss: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToEnd: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Добавить в очередь") },
+        text = {
+            Column {
+                Text(song.title, color = PulseMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(10.dp))
+                TextButton(onClick = onPlayNext, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.SkipNext, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Воспроизвести следующим")
+                }
+                TextButton(onClick = onAddToEnd, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.QueueMusic, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Добавить в конец очереди")
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
+}
+
+@Composable
+private fun SleepTimerDialog(
+    remainingMs: Long,
+    onDismiss: () -> Unit,
+    onSelect: (Int?) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Bedtime, contentDescription = null, tint = PulsePurple) },
+        title = { Text("Таймер сна") },
+        text = {
+            Column {
+                if (remainingMs > 0L) {
+                    Text("Музыка остановится через ${formatTimer(remainingMs)}", color = PulseMint)
+                    Spacer(Modifier.height(8.dp))
+                }
+                listOf(15, 30, 45, 60).forEach { minutes ->
+                    TextButton(
+                        onClick = { onSelect(minutes) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Через $minutes минут")
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            if (remainingMs > 0L) {
+                TextButton(onClick = { onSelect(null) }) { Text("Отключить") }
+            } else {
+                TextButton(onClick = onDismiss) { Text("Отмена") }
+            }
+        },
+    )
 }
 
 @Composable
@@ -889,4 +1351,11 @@ private fun formatDuration(milliseconds: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "%d:%02d".format(minutes, seconds)
+}
+
+private fun formatTimer(milliseconds: Long): String {
+    val totalMinutes = (milliseconds.coerceAtLeast(0L) + 59_999L) / 60_000L
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return if (hours > 0) "$hours ч ${minutes.toString().padStart(2, '0')} мин" else "$minutes мин"
 }

@@ -2,6 +2,7 @@ package ru.maxx52.pulseplayer
 
 import android.app.Application
 import android.content.ComponentName
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -15,11 +16,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.maxx52.pulseplayer.data.MediaStoreMusicRepository
 import ru.maxx52.pulseplayer.data.MusicPreferences
+import ru.maxx52.pulseplayer.data.PlaybackSnapshot
 import ru.maxx52.pulseplayer.model.Playlist
 import ru.maxx52.pulseplayer.model.Song
 import ru.maxx52.pulseplayer.playback.PlaybackService
@@ -37,6 +40,9 @@ data class PlayerUiState(
     val durationMs: Long = 0L,
     val shuffleEnabled: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
+    val queue: List<Song> = emptyList(),
+    val currentQueueIndex: Int = -1,
+    val sleepTimerRemainingMs: Long = 0L,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -74,6 +80,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val playerState: StateFlow<PlayerUiState> = _playerState
 
     private var controller: MediaController? = null
+    private var savedPlaybackSnapshot: PlaybackSnapshot? = null
+    private var playbackRestored = false
+    private var sleepDeadlineElapsedMs: Long? = null
     private val controllerFuture = MediaController.Builder(
         application,
         SessionToken(application, ComponentName(application, PlaybackService::class.java)),
@@ -90,6 +99,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             {
                 controller = runCatching { controllerFuture.get() }.getOrNull()?.also {
                     it.addListener(playerListener)
+                    restorePlaybackIfReady(it)
                     updatePlayerState(it)
                 }
             },
@@ -97,9 +107,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         viewModelScope.launch {
+            savedPlaybackSnapshot = preferences.playbackSnapshot.first()
+            controller?.let(::restorePlaybackIfReady)
+        }
+
+        viewModelScope.launch {
             while (true) {
                 delay(500)
-                controller?.let(::updatePlayerState)
+                controller?.let { player ->
+                    updateSleepTimer(player)
+                    updatePlayerState(player)
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            while (true) {
+                delay(5_000)
+                controller?.takeIf { playbackRestored && it.mediaItemCount > 0 }?.let {
+                    preferences.savePlaybackState(it.toPlaybackSnapshot())
+                }
             }
         }
     }
@@ -112,6 +139,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .onSuccess { songs ->
                     allSongs.value = songs
                     _libraryState.value = LibraryUiState(songs = songs)
+                    controller?.let(::restorePlaybackIfReady)
                 }
                 .onFailure { error ->
                     _libraryState.value = LibraryUiState(
@@ -132,6 +160,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         activeController.setMediaItems(playableQueue.map(Song::toMediaItem), index, 0L)
         activeController.prepare()
         activeController.play()
+    }
+
+    fun playNext(song: Song) {
+        controller?.let { player ->
+            if (player.mediaItemCount == 0) {
+                player.setMediaItem(song.toMediaItem())
+                player.prepare()
+                player.play()
+            } else {
+                player.addMediaItem((player.currentMediaItemIndex + 1).coerceAtMost(player.mediaItemCount), song.toMediaItem())
+            }
+            updatePlayerState(player)
+        }
+    }
+
+    fun addToQueue(song: Song) {
+        controller?.let { player ->
+            player.addMediaItem(song.toMediaItem())
+            if (player.playbackState == Player.STATE_IDLE) player.prepare()
+            updatePlayerState(player)
+        }
+    }
+
+    fun playQueueItem(index: Int) {
+        controller?.takeIf { index in 0 until it.mediaItemCount }?.let {
+            it.seekToDefaultPosition(index)
+            it.play()
+        }
+    }
+
+    fun removeQueueItem(index: Int) {
+        controller?.takeIf { index in 0 until it.mediaItemCount }?.let {
+            it.removeMediaItem(index)
+            updatePlayerState(it)
+        }
+    }
+
+    fun moveQueueItem(fromIndex: Int, toIndex: Int) {
+        controller?.let {
+            if (fromIndex in 0 until it.mediaItemCount && toIndex in 0 until it.mediaItemCount) {
+                it.moveMediaItem(fromIndex, toIndex)
+                updatePlayerState(it)
+            }
+        }
+    }
+
+    fun setSleepTimer(minutes: Int?) {
+        sleepDeadlineElapsedMs = minutes?.let {
+            SystemClock.elapsedRealtime() + it * 60_000L
+        }
+        controller?.let(::updatePlayerState)
     }
 
     fun togglePlayPause() {
@@ -191,12 +270,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun songsByIds(ids: Set<Long>): List<Song> = allSongs.value.filter { it.id in ids }
 
+    private fun restorePlaybackIfReady(player: MediaController) {
+        if (playbackRestored) return
+        if (player.mediaItemCount > 0) {
+            playbackRestored = true
+            return
+        }
+        val snapshot = savedPlaybackSnapshot ?: return
+        val songs = allSongs.value
+        if (songs.isEmpty()) return
+        val songsById = songs.associateBy(Song::id)
+        val restoredQueue = snapshot.queueIds.mapNotNull(songsById::get)
+        playbackRestored = true
+        if (restoredQueue.isEmpty()) return
+        val index = snapshot.currentIndex.coerceIn(restoredQueue.indices)
+        player.setMediaItems(restoredQueue.map(Song::toMediaItem), index, snapshot.positionMs.coerceAtLeast(0L))
+        player.shuffleModeEnabled = snapshot.shuffleEnabled
+        player.repeatMode = snapshot.repeatMode.takeIf {
+            it in Player.REPEAT_MODE_OFF..Player.REPEAT_MODE_ALL
+        } ?: Player.REPEAT_MODE_OFF
+        player.prepare()
+    }
+
+    private fun updateSleepTimer(player: Player) {
+        val deadline = sleepDeadlineElapsedMs ?: return
+        if (SystemClock.elapsedRealtime() >= deadline) {
+            player.pause()
+            sleepDeadlineElapsedMs = null
+        }
+    }
+
     private fun updatePlayerState(player: Player) {
         val currentItem = player.currentMediaItem
         val currentSong = currentItem?.let { item ->
             allSongs.value.firstOrNull { it.id.toString() == item.mediaId }
                 ?: item.toFallbackSong()
         }
+        val queue = List(player.mediaItemCount) { index ->
+            val item = player.getMediaItemAt(index)
+            allSongs.value.firstOrNull { it.id.toString() == item.mediaId }
+                ?: item.toFallbackSong()
+        }.filterNotNull()
+        val remainingSleepMs = sleepDeadlineElapsedMs
+            ?.let { (it - SystemClock.elapsedRealtime()).coerceAtLeast(0L) }
+            ?: 0L
         _playerState.update {
             PlayerUiState(
                 currentSong = currentSong,
@@ -207,9 +324,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ?: 0L,
                 shuffleEnabled = player.shuffleModeEnabled,
                 repeatMode = player.repeatMode,
+                queue = queue,
+                currentQueueIndex = player.currentMediaItemIndex,
+                sleepTimerRemainingMs = remainingSleepMs,
             )
         }
     }
+
+    private fun Player.toPlaybackSnapshot(): PlaybackSnapshot = PlaybackSnapshot(
+        queueIds = List(mediaItemCount) { getMediaItemAt(it).mediaId.toLongOrNull() }.filterNotNull(),
+        currentIndex = currentMediaItemIndex.coerceAtLeast(0),
+        positionMs = currentPosition.coerceAtLeast(0L),
+        shuffleEnabled = shuffleModeEnabled,
+        repeatMode = repeatMode,
+    )
 
     private fun MediaItem.toFallbackSong(): Song? {
         val uri = localConfiguration?.uri ?: return null
