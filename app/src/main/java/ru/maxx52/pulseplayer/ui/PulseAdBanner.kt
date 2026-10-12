@@ -29,10 +29,11 @@ fun PulseAdBanner(modifier: Modifier = Modifier) {
 
     val context = LocalContext.current
     val widthDp = LocalConfiguration.current.screenWidthDp
-    var loaded by remember(adUnitId) { mutableStateOf(false) }
+    var loaded by remember(adUnitId, widthDp) { mutableStateOf(false) }
+    val adSize = remember(context, widthDp) { BannerAdSize.sticky(context, widthDp) }
     val banner = remember(adUnitId, widthDp) {
         BannerAdView(context).apply {
-            setAdSize(BannerAdSize.sticky(context, widthDp))
+            setAdSize(adSize)
             setBannerAdEventListener(object : BannerAdEventListener {
                 override fun onAdLoaded() {
                     loaded = true
@@ -57,7 +58,7 @@ fun PulseAdBanner(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(if (loaded) 50.dp else 1.dp),
+            .height(if (loaded) (adSize.getHeightInPixels(context) / context.resources.displayMetrics.density).dp else 1.dp),
     ) {
         AndroidView(
             factory = { banner },
