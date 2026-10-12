@@ -212,7 +212,6 @@ fun PulseApp(
                     .background(MaterialTheme.colorScheme.background)
                     .navigationBarsPadding(),
             ) {
-                PulseAdBanner()
                 playerState.currentSong?.let { song ->
                     MiniPlayer(
                         song = song,
@@ -223,6 +222,7 @@ fun PulseApp(
                         onNext = viewModel::skipNext,
                     )
                 }
+                PulseAdBanner()
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     HomeTab.entries.forEach { tab ->
                         NavigationBarItem(
