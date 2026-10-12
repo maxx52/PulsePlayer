@@ -16,7 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.yandex.mobile.ads.common.YandexAds
+import ru.maxx52.pulseplayer.ads.PulseAds
 import ru.maxx52.pulseplayer.ui.PulseApp
 import ru.maxx52.pulseplayer.ui.theme.PulseTheme
 
@@ -24,16 +24,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val adPreferences = getSharedPreferences("pulse_ads", MODE_PRIVATE)
-        YandexAds.setUserConsent(adPreferences.getBoolean("personalized_ads", false))
-        YandexAds.setLocationTracking(false)
-        YandexAds.setAgeRestricted(false)
-        YandexAds.initialize(this) { }
+        PulseAds.initialize(this, adPreferences.getBoolean("personalized_ads", false))
         enableEdgeToEdge()
         setContent {
             PulseTheme {
                 val playerViewModel: MainViewModel = viewModel()
                 var showAdConsent by remember {
-                    mutableStateOf(!adPreferences.getBoolean("choice_saved", false))
+                    mutableStateOf(BuildConfig.ADS_ENABLED && !adPreferences.getBoolean("choice_saved", false))
                 }
                 val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     Manifest.permission.READ_MEDIA_AUDIO
@@ -87,7 +84,7 @@ class MainActivity : ComponentActivity() {
                             .putBoolean("choice_saved", true)
                             .putBoolean("personalized_ads", personalized)
                             .apply()
-                        YandexAds.setUserConsent(personalized)
+                        PulseAds.setUserConsent(personalized)
                         showAdConsent = false
                     },
                 )
