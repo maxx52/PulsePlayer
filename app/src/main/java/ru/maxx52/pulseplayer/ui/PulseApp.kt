@@ -98,6 +98,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
@@ -179,10 +180,25 @@ fun PulseApp(
         return
     }
 
+    val topBarScrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    val libraryHeader: @Composable () -> Unit = {
+        LibraryHeader(libraryState.songs.size, query, viewModel::updateQuery)
+        LibraryViewSelector(libraryView) {
+            libraryView = it
+            openedArtist = null
+            openedAlbum = null
+            openedAlbumArtist = null
+            openedFolder = null
+        }
+        SortBar(sortSettings) { showSortDialog = true }
+    }
+
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarScrollBehavior.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             CenterAlignedTopAppBar(
+                scrollBehavior = topBarScrollBehavior,
                 title = {
                     Text(
                         text = "PULSE",
@@ -251,27 +267,10 @@ fun PulseApp(
         ) {
             when (activeTab) {
                 HomeTab.MUSIC -> {
-                    LibraryHeader(
-                        songCount = libraryState.songs.size,
-                        query = query,
-                        onQueryChange = viewModel::updateQuery,
-                    )
-                    LibraryViewSelector(
-                        selected = libraryView,
-                        onSelect = {
-                            libraryView = it
-                            openedArtist = null
-                            openedAlbum = null
-                            openedAlbumArtist = null
-                            openedFolder = null
-                        },
-                    )
-                    SortBar(
-                        settings = sortSettings,
-                        onClick = { showSortDialog = true },
-                    )
+                    if (libraryView != LibraryView.TRACKS) libraryHeader()
                     when (libraryView) {
                         LibraryView.TRACKS -> SongList(
+                            header = libraryHeader,
                             songs = songs,
                             queue = songs,
                             favorites = favorites,
@@ -882,15 +881,8 @@ private fun SongList(
     onFavorite: (Long) -> Unit,
     onAddToPlaylist: (Song) -> Unit,
     onQueueAction: (Song) -> Unit,
+    header: (@Composable () -> Unit)? = null,
 ) {
-    if (loading) {
-        EmptyState(Icons.Rounded.MusicNote, "Сканируем медиатеку…")
-        return
-    }
-    if (songs.isEmpty()) {
-        EmptyState(Icons.Rounded.LibraryMusic, emptyTitle)
-        return
-    }
     LazyColumn(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
             start = 14.dp,
@@ -900,6 +892,14 @@ private fun SongList(
         ),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        header?.let { content -> item(key = "library_header") { Column { content() } } }
+        if (loading || songs.isEmpty()) {
+            item(key = "empty_state") {
+                Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                    Text(if (loading) "Сканируем медиатеку…" else emptyTitle, color = PulseMuted)
+                }
+            }
+        }
         items(songs, key = Song::id) { song ->
             SongRow(
                 song = song,
