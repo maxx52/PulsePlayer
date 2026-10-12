@@ -30,6 +30,21 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("store") {
+            dimension = "distribution"
+            buildConfigField("boolean", "ADS_ENABLED", "true")
+        }
+        create("personal") {
+            dimension = "distribution"
+            applicationIdSuffix = ".personal"
+            versionNameSuffix = "-personal"
+            resValue("string", "app_name", "Pulse Personal")
+            buildConfigField("boolean", "ADS_ENABLED", "false")
+        }
+    }
+
     signingConfigs {
         if (signingPropertiesFile.exists()) {
             create("release") {
@@ -90,7 +105,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.11.0")
     implementation("androidx.media3:media3-session:1.11.0")
     implementation("androidx.datastore:datastore-preferences:1.2.0")
-    implementation("com.yandex.android:mobileads:8.5.0")
+    add("storeImplementation", "com.yandex.android:mobileads:8.5.0")
 }
 
 val verifyReleaseConfiguration by tasks.registering {
@@ -106,6 +121,6 @@ val verifyReleaseConfiguration by tasks.registering {
     }
 }
 
-tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+tasks.matching { it.name == "preStoreReleaseBuild" }.configureEach {
     dependsOn(verifyReleaseConfiguration)
 }
