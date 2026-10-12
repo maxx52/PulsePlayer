@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">Pulse</string>
+    <string name="widget_brand">PULSE</string>
+    <string name="widget_description">Управление музыкой Pulse Player</string>
+    <string name="widget_no_track">Музыка не выбрана</string>
+    <string name="widget_tap_to_open">Нажмите, чтобы открыть Pulse</string>
+    <string name="widget_previous">Предыдущий трек</string>
+    <string name="widget_play_pause">Пауза или воспроизведение</string>
+    <string name="widget_next">Следующий трек</string>
 </resources>

@@ -23,6 +23,9 @@ import kotlinx.coroutines.launch
 import ru.maxx52.pulseplayer.data.MediaStoreMusicRepository
 import ru.maxx52.pulseplayer.data.MusicPreferences
 import ru.maxx52.pulseplayer.data.PlaybackSnapshot
+import ru.maxx52.pulseplayer.data.EqualizerPreferences
+import ru.maxx52.pulseplayer.data.EqualizerPreset
+import ru.maxx52.pulseplayer.data.EqualizerSettings
 import ru.maxx52.pulseplayer.model.Playlist
 import ru.maxx52.pulseplayer.model.Song
 import ru.maxx52.pulseplayer.playback.PlaybackService
@@ -60,6 +63,7 @@ data class SortSettings(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = MediaStoreMusicRepository(application)
     private val preferences = MusicPreferences(application)
+    private val equalizerPreferences = EqualizerPreferences(application)
 
     private val allSongs = MutableStateFlow<List<Song>>(emptyList())
     private val searchQuery = MutableStateFlow("")
@@ -77,6 +81,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
         emptyList(),
+    )
+    val equalizerSettings: StateFlow<EqualizerSettings> = equalizerPreferences.settings.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        equalizerPreferences.read(),
     )
 
     val filteredSongs: StateFlow<List<Song>> = combine(
@@ -286,6 +295,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 else -> Player.REPEAT_MODE_OFF
             }
         }
+    }
+
+    fun setEqualizerEnabled(enabled: Boolean) {
+        equalizerPreferences.setEnabled(enabled)
+    }
+
+    fun setEqualizerBand(index: Int, value: Int) {
+        equalizerPreferences.setBand(index, value)
+    }
+
+    fun applyEqualizerPreset(preset: EqualizerPreset) {
+        equalizerPreferences.applyPreset(preset)
     }
 
     fun toggleFavorite(songId: Long) {

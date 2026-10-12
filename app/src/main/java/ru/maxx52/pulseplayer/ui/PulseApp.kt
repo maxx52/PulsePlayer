@@ -33,9 +33,11 @@ import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -76,6 +78,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -96,6 +99,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -105,9 +109,12 @@ import androidx.media3.common.Player
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.maxx52.pulseplayer.MainViewModel
+import ru.maxx52.pulseplayer.BuildConfig
 import ru.maxx52.pulseplayer.PlayerUiState
 import ru.maxx52.pulseplayer.SongSort
 import ru.maxx52.pulseplayer.SortSettings
+import ru.maxx52.pulseplayer.data.EqualizerPreset
+import ru.maxx52.pulseplayer.data.EqualizerSettings
 import ru.maxx52.pulseplayer.model.Playlist
 import ru.maxx52.pulseplayer.model.Song
 import ru.maxx52.pulseplayer.ui.theme.PulseMint
@@ -135,6 +142,9 @@ fun PulseApp(
     viewModel: MainViewModel,
     permissionGranted: Boolean,
     requestPermission: () -> Unit,
+    showAdConsent: Boolean,
+    requestAdSettings: () -> Unit,
+    saveAdConsent: (Boolean) -> Unit,
 ) {
     val libraryState by viewModel.libraryState.collectAsStateWithLifecycle()
     val songs by viewModel.filteredSongs.collectAsStateWithLifecycle()
@@ -143,6 +153,7 @@ fun PulseApp(
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
     val sortSettings by viewModel.sortSettings.collectAsStateWithLifecycle()
+    val equalizerSettings by viewModel.equalizerSettings.collectAsStateWithLifecycle()
 
     var activeTab by rememberSaveable { mutableStateOf(HomeTab.MUSIC) }
     var showPlayer by rememberSaveable { mutableStateOf(false) }
@@ -159,6 +170,9 @@ fun PulseApp(
     var showSleepTimer by rememberSaveable { mutableStateOf(false) }
     var openedFolder by rememberSaveable { mutableStateOf<String?>(null) }
     var showSortDialog by rememberSaveable { mutableStateOf(false) }
+    var showEqualizer by rememberSaveable { mutableStateOf(false) }
+    var playlistPendingDeletion by remember { mutableStateOf<String?>(null) }
+    var showAbout by rememberSaveable { mutableStateOf(false) }
 
     if (!permissionGranted) {
         PermissionScreen(requestPermission)
@@ -177,6 +191,12 @@ fun PulseApp(
                     )
                 },
                 actions = {
+                    IconButton(onClick = { showEqualizer = true }) {
+                        Icon(Icons.Rounded.Equalizer, contentDescription = "Эквалайзер")
+                    }
+                    IconButton(onClick = { showAbout = true }) {
+                        Icon(Icons.Rounded.Info, contentDescription = "О приложении")
+                    }
                     IconButton(onClick = viewModel::loadLibrary) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "Обновить медиатеку")
                     }
@@ -192,6 +212,7 @@ fun PulseApp(
                     .background(MaterialTheme.colorScheme.background)
                     .navigationBarsPadding(),
             ) {
+                PulseAdBanner()
                 playerState.currentSong?.let { song ->
                     MiniPlayer(
                         song = song,
@@ -368,7 +389,7 @@ fun PulseApp(
                             playlists = playlists,
                             onOpen = { openedPlaylist = it.name },
                             onCreate = { showCreatePlaylist = true },
-                            onDelete = viewModel::deletePlaylist,
+                            onDelete = { playlistPendingDeletion = it },
                         )
                     } else {
                         val playlistSongs = viewModel.songsByIds(selectedPlaylist.songIds)
@@ -410,6 +431,7 @@ fun PulseApp(
                     showQueue = true
                 },
                 onOpenSleepTimer = { showSleepTimer = true },
+                onOpenEqualizer = { showEqualizer = true },
             )
         }
     }
@@ -437,6 +459,45 @@ fun PulseApp(
                 showSleepTimer = false
             },
         )
+    }
+
+    if (showEqualizer) {
+        ModalBottomSheet(
+            onDismissRequest = { showEqualizer = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
+            EqualizerSheet(
+                settings = equalizerSettings,
+                onEnabledChange = viewModel::setEqualizerEnabled,
+                onBandChange = viewModel::setEqualizerBand,
+                onPreset = viewModel::applyEqualizerPreset,
+            )
+        }
+    }
+
+    playlistPendingDeletion?.let { name ->
+        DeletePlaylistDialog(
+            playlistName = name,
+            onDismiss = { playlistPendingDeletion = null },
+            onConfirm = {
+                viewModel.deletePlaylist(name)
+                playlistPendingDeletion = null
+            },
+        )
+    }
+
+    if (showAbout) {
+        AboutDialog(
+            onDismiss = { showAbout = false },
+            onAdSettings = {
+                showAbout = false
+                requestAdSettings()
+            },
+        )
+    }
+
+    if (showAdConsent) {
+        AdConsentDialog(onSelect = saveAdConsent)
     }
 
     if (showSortDialog) {
@@ -1089,6 +1150,7 @@ private fun FullPlayer(
     onRepeat: () -> Unit,
     onOpenQueue: () -> Unit,
     onOpenSleepTimer: () -> Unit,
+    onOpenEqualizer: () -> Unit,
 ) {
     val song = state.currentSong ?: return
     Column(
@@ -1179,6 +1241,11 @@ private fun FullPlayer(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
+            TextButton(onClick = onOpenEqualizer) {
+                Icon(Icons.Rounded.Equalizer, contentDescription = null)
+                Spacer(Modifier.width(7.dp))
+                Text("Звук")
+            }
             TextButton(onClick = onOpenQueue) {
                 Icon(Icons.Rounded.QueueMusic, contentDescription = null)
                 Spacer(Modifier.width(7.dp))
@@ -1196,6 +1263,71 @@ private fun FullPlayer(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun EqualizerSheet(
+    settings: EqualizerSettings,
+    onEnabledChange: (Boolean) -> Unit,
+    onBandChange: (Int, Int) -> Unit,
+    onPreset: (EqualizerPreset) -> Unit,
+) {
+    val labels = listOf("60 Гц", "230 Гц", "910 Гц", "3,6 кГц", "14 кГц")
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp)
+            .padding(bottom = 32.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("ЭКВАЛАЙЗЕР", fontSize = 27.sp, fontWeight = FontWeight.Black)
+                Text(
+                    if (settings.enabled) "Обработка звука включена" else "Звук без обработки",
+                    color = PulseMuted,
+                )
+            }
+            Switch(checked = settings.enabled, onCheckedChange = onEnabledChange)
+        }
+        Spacer(Modifier.height(14.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            EqualizerPreset.entries.forEach { preset ->
+                FilterChip(
+                    selected = settings.bands == preset.bands,
+                    onClick = { onPreset(preset) },
+                    label = { Text(preset.title) },
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        labels.forEachIndexed { index, label ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label, modifier = Modifier.width(70.dp), color = PulseMuted, fontSize = 12.sp)
+                Slider(
+                    value = settings.bands.getOrElse(index) { 0 }.toFloat(),
+                    onValueChange = { onBandChange(index, it.toInt()) },
+                    valueRange = -10f..10f,
+                    steps = 19,
+                    enabled = settings.enabled,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "%+d".format(settings.bands.getOrElse(index) { 0 }),
+                    modifier = Modifier.width(34.dp),
+                    fontSize = 12.sp,
+                    color = if (settings.enabled) PulseMint else PulseMuted,
+                )
+            }
+        }
+        Text(
+            "Настройки применяются к фоновому воспроизведению и сохраняются между запусками.",
+            color = PulseMuted,
+            fontSize = 12.sp,
+        )
     }
 }
 
@@ -1438,6 +1570,109 @@ private fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Un
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
+}
+
+@Composable
+private fun DeletePlaylistDialog(
+    playlistName: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.DeleteOutline, contentDescription = null, tint = PulsePink) },
+        title = { Text("Удалить плейлист?") },
+        text = {
+            Text(
+                "Плейлист «$playlistName» будет удалён. Сами аудиофайлы останутся на телефоне.",
+                color = PulseMuted,
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = PulsePink),
+            ) {
+                Text("Удалить")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
+}
+
+@Composable
+private fun AboutDialog(onDismiss: () -> Unit, onAdSettings: () -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Info, contentDescription = null, tint = PulseMint) },
+        title = { Text("Pulse Player ${BuildConfig.VERSION_NAME}") },
+        text = {
+            Column {
+                Text(
+                    "Офлайн-плеер для музыки на вашем телефоне. Медиатека и плейлисты не загружаются на сервер.",
+                    color = PulseMuted,
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Бесплатная версия содержит рекламу Яндекса.",
+                    color = PulseMuted,
+                )
+                Spacer(Modifier.height(10.dp))
+                TextButton(
+                    onClick = {
+                        uriHandler.openUri(
+                            "https://github.com/maxx52/PulsePlayer/blob/main/docs/PRIVACY_POLICY.md",
+                        )
+                    },
+                ) {
+                    Text("Политика конфиденциальности")
+                }
+                TextButton(onClick = onAdSettings) {
+                    Text("Настройки рекламы")
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Готово") } },
+    )
+}
+
+@Composable
+private fun AdConsentDialog(onSelect: (Boolean) -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    AlertDialog(
+        onDismissRequest = { },
+        icon = { Icon(Icons.Rounded.Info, contentDescription = null, tint = PulseMint) },
+        title = { Text("Реклама и конфиденциальность") },
+        text = {
+            Column {
+                Text(
+                    "Pulse бесплатный и показывает рекламу Яндекса. Можно разрешить персонализацию или использовать менее персонализированную рекламу.",
+                    color = PulseMuted,
+                )
+                Spacer(Modifier.height(8.dp))
+                TextButton(
+                    onClick = {
+                        uriHandler.openUri(
+                            "https://github.com/maxx52/PulsePlayer/blob/main/docs/PRIVACY_POLICY.md",
+                        )
+                    },
+                ) {
+                    Text("Открыть политику конфиденциальности")
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSelect(true) }) {
+                Text("Разрешить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onSelect(false) }) {
+                Text("Без персонализации")
+            }
+        },
     )
 }
 

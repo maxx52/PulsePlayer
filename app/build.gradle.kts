@@ -1,7 +1,19 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val signingPropertiesFile = rootProject.file("keystore.properties")
+val signingProperties = Properties().apply {
+    if (signingPropertiesFile.exists()) {
+        signingPropertiesFile.inputStream().use { input -> load(input) }
+    }
+}
+val releaseBannerId = providers.gradleProperty("PULSE_YANDEX_BANNER_ID").orElse("").get()
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
 
 android {
     namespace = "ru.maxx52.pulseplayer"
@@ -11,17 +23,35 @@ android {
         applicationId = "ru.maxx52.pulseplayer"
         minSdk = 26
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
 
+    signingConfigs {
+        if (signingPropertiesFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(signingProperties.getProperty("storeFile"))
+                storePassword = signingProperties.getProperty("storePassword")
+                keyAlias = signingProperties.getProperty("keyAlias")
+                keyPassword = signingProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            buildConfigField("String", "YANDEX_BANNER_ID", "\"demo-banner-yandex\"")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles("proguard-rules.pro")
+            buildConfigField("String", "YANDEX_BANNER_ID", "\"$releaseBannerId\"")
+            if (signingPropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -60,4 +90,22 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.11.0")
     implementation("androidx.media3:media3-session:1.11.0")
     implementation("androidx.datastore:datastore-preferences:1.2.0")
+    implementation("com.yandex.android:mobileads:8.5.0")
+}
+
+val verifyReleaseConfiguration by tasks.registering {
+    group = "verification"
+    description = "Проверяет рекламу и подпись перед release-сборкой."
+    doLast {
+        check(releaseBannerId.isNotBlank()) {
+            "Добавьте PULSE_YANDEX_BANNER_ID в пользовательский gradle.properties."
+        }
+        check(signingPropertiesFile.exists()) {
+            "Создайте keystore.properties по примеру keystore.properties.example."
+        }
+    }
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(verifyReleaseConfiguration)
 }
