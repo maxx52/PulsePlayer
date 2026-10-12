@@ -1607,7 +1607,7 @@ private fun AboutDialog(onDismiss: () -> Unit, onAdSettings: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.Info, contentDescription = null, tint = PulseMint) },
-        title = { Text("Pulse Player ${BuildConfig.VERSION_NAME}") },
+        title = { Text("${if (BuildConfig.ADS_ENABLED) "Pulse Player" else "Pulse Personal"} ${BuildConfig.VERSION_NAME}") },
         text = {
             Column {
                 Text(
@@ -1616,7 +1616,7 @@ private fun AboutDialog(onDismiss: () -> Unit, onAdSettings: () -> Unit) {
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Бесплатная версия содержит рекламу Яндекса.",
+                    if (BuildConfig.ADS_ENABLED) "Бесплатная версия содержит рекламу Яндекса." else "Личная версия без рекламы и рекламного SDK.",
                     color = PulseMuted,
                 )
                 Spacer(Modifier.height(10.dp))
@@ -1629,7 +1629,7 @@ private fun AboutDialog(onDismiss: () -> Unit, onAdSettings: () -> Unit) {
                 ) {
                     Text("Политика конфиденциальности")
                 }
-                TextButton(onClick = onAdSettings) {
+                if (BuildConfig.ADS_ENABLED) TextButton(onClick = onAdSettings) {
                     Text("Настройки рекламы")
                 }
             }
